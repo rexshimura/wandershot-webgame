@@ -1,30 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-
-// ==========================================
-// GAME CONFIG & WORLD BOUNDS
-// ==========================================
+import Canvas from './components/Canvas';
+import CountCoins, { updateCoinMagnet } from './components/CountCoins';
+import CountKills from './components/CountKills';
+import CountScore from './components/CountScore';
+import FramerateCounter from './components/FramerateCounter';
+import { renderMinimap } from './components/Minimap';
+import Pause from './components/Pause';
+import PlayerHpbar from './components/PlayerHpbar';
+import Pitchling from './components/enemies/Pitchling';
+import { ENEMY_TYPES } from './config/enemies-config';
+import { PLAYER_CONFIG } from './config/player-config';
+import { renderPlayer } from './entities/Player';
 
 const WORLD_WIDTH = 3000;
 const WORLD_HEIGHT = 3000;
 
-const ENEMY_TYPES = {
-  PITCHLING: {
-    name: 'Pitchling',
-    maxHp: 9,
-    speed: 120,
-    radius: 18,
-    contactDamage: 6,
-    attackInterval: 1000,
-    scoreValue: 5,
-    spriteSrc: '/enemies/pitchling/pitchling.gif',
-    deathSpriteSrc: '/enemies/pitchling/dead-pitchling.gif',
-  },
-};
-
 export default function App() {
   const canvasRef = useRef(null);
-
-  // Direct DOM Refs
   const hpTextRef = useRef(null);
   const hpBarRef = useRef(null);
   const killsRef = useRef(null);
@@ -32,12 +24,9 @@ export default function App() {
   const scoreRef = useRef(null);
   const fpsRef = useRef(null);
 
-  // Active Enemies & Death GIF state
   const [activeEnemies, setActiveEnemies] = useState([]);
   const [activeDeathEffects, setActiveDeathEffects] = useState([]);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
-
-  // Overlay States
   const [isPaused, setIsPaused] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
 
@@ -53,8 +42,10 @@ export default function App() {
     const ctx = canvas.getContext('2d');
 
     const handleResize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      if (canvas) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
     };
     handleResize();
     window.addEventListener('resize', handleResize);
@@ -77,38 +68,22 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    // ==========================================
-    // GAME STATE & STATS
-    // ==========================================
-
-    const stats = {
-      score: 0,
-      kills: 0,
-      coins: 0,
-    };
-
+    const stats = { score: 0, kills: 0, coins: 0 };
     const player = {
       x: WORLD_WIDTH / 2,
       y: WORLD_HEIGHT / 2,
-      radius: 16,
-      speed: 250,
-      hp: 100,
-      maxHp: 100,
+      ...PLAYER_CONFIG,
       lastShotTime: 0,
-      attackInterval: 1000,
-      bulletDamage: 3,
-      bulletRange: 400,
-      magnetRange: 120,
-      bulletSpeed: 500,
+      aimAngle: 0,
     };
 
     let enemies = [];
     let bullets = [];
     let deathEffects = [];
     let droppedCoins = [];
-    let damageTexts = []; // Floating damage numbers
-    let bulletImpacts = []; // Air bullet impact bursts
-    let lastSpawnTime = 0;
+    let damageTexts = [];
+    let bulletImpacts = [];
+    let lastSpawnTime = performance.now();
     let lastFrameTime = performance.now();
 
     let frameCount = 0;
@@ -153,7 +128,7 @@ export default function App() {
         y,
         hp: type.maxHp,
         lastAttackTime: 0,
-        hitTimer: 0, // Flash effect timer on hit
+        hitTimer: 0,
         isDead: false,
       });
     };
@@ -161,7 +136,6 @@ export default function App() {
     const rollCoinDrop = (x, y) => {
       const rand = Math.random();
       let count = 0;
-
       if (rand <= 0.3) count = 2;
       else if (rand <= 0.9) count = 1;
 
@@ -175,11 +149,9 @@ export default function App() {
       }
     };
 
-    // ==========================================
-    // HIGH-PERFORMANCE GAME LOOP
-    // ==========================================
-
     const gameLoop = (currentTime) => {
+      animationFrameId = requestAnimationFrame(gameLoop);
+
       const dt = Math.min((currentTime - lastFrameTime) / 1000, 0.1);
       lastFrameTime = currentTime;
 
@@ -192,12 +164,9 @@ export default function App() {
         lastFpsUpdateTime = currentTime;
       }
 
-      if (isPausedRef.current || isGameOverRef.current) {
-        animationFrameId = requestAnimationFrame(gameLoop);
-        return;
-      }
+      if (isPausedRef.current || isGameOverRef.current) return;
 
-      // 1. PLAYER MOVEMENT
+      // Player Movement
       let moveX = 0;
       let moveY = 0;
       if (keys['KeyW'] || keys['ArrowUp']) moveY -= 1;
@@ -212,31 +181,29 @@ export default function App() {
 
       player.x += moveX * player.speed * dt;
       player.y += moveY * player.speed * dt;
-
       player.x = Math.max(player.radius, Math.min(WORLD_WIDTH - player.radius, player.x));
       player.y = Math.max(player.radius, Math.min(WORLD_HEIGHT - player.radius, player.y));
 
-      // 2. CAMERA CALCULATION
+      // Camera
       let camX = player.x - canvas.width / 2;
       let camY = player.y - canvas.height / 2;
-
       camX = Math.max(0, Math.min(WORLD_WIDTH - canvas.width, camX));
       camY = Math.max(0, Math.min(WORLD_HEIGHT - canvas.height, camY));
 
       setCameraPos({ x: camX, y: camY });
 
-      // 3. BACKGROUND & GRID RENDER
+      // Render Clear
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#f8fafc';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
       ctx.translate(-camX, -camY);
 
-      // Grid
+      // Render Grid
       ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 1;
       const gridSize = 50;
-
       const startX = Math.floor(camX / gridSize) * gridSize;
       const endX = Math.min(WORLD_WIDTH, camX + canvas.width + gridSize);
       const startY = Math.floor(camY / gridSize) * gridSize;
@@ -260,7 +227,7 @@ export default function App() {
       ctx.lineWidth = 6;
       ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-      // 4. DRAW PLAYER RANGE
+      // Player Range Indicator
       ctx.save();
       ctx.beginPath();
       ctx.arc(player.x, player.y, player.bulletRange, 0, Math.PI * 2);
@@ -274,36 +241,70 @@ export default function App() {
       ctx.fill();
       ctx.restore();
 
-      // 5. SPAWN LOGIC
+      // Enemy Spawner
       if (currentTime - lastSpawnTime > 1200 && enemies.length < 25) {
         spawnEnemy('PITCHLING');
         lastSpawnTime = currentTime;
       }
 
-      // 6. AUTO-SHOOTING LOGIC
-      if (currentTime - player.lastShotTime >= player.attackInterval) {
-        const target = getNearestEnemy();
-        if (target) {
-          const dx = target.x - player.x;
-          const dy = target.y - player.y;
-          const angle = Math.atan2(dy, dx);
-
-          bullets.push({
-            x: player.x,
-            y: player.y,
-            vx: Math.cos(angle) * player.bulletSpeed,
-            vy: Math.sin(angle) * player.bulletSpeed,
-            radius: 6,
-            damage: player.bulletDamage,
-            distanceTraveled: 0,
-            maxRange: player.bulletRange,
-          });
-
-          player.lastShotTime = currentTime;
-        }
+      // Aiming & Shooting
+      const target = getNearestEnemy();
+      if (target) {
+        const dx = target.x - player.x;
+        const dy = target.y - player.y;
+        player.aimAngle = Math.atan2(dy, dx);
       }
 
-      // 7. BULLETS UPDATE & IMPACT EFFECTS
+      const timeSinceLastShot = currentTime - player.lastShotTime;
+
+      // Charge-Up
+      if (target && timeSinceLastShot >= player.attackInterval - player.chargeDuration) {
+        const chargeProgress = Math.min(
+          1,
+          (timeSinceLastShot - (player.attackInterval - player.chargeDuration)) / player.chargeDuration
+        );
+
+        const wandLength = 22;
+        const wandTipX = player.x + Math.cos(player.aimAngle) * wandLength;
+        const wandTipY = player.y + Math.sin(player.aimAngle) * wandLength;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(wandTipX, wandTipY, 3 + chargeProgress * 5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(56, 189, 248, ${0.3 + chargeProgress * 0.7})`;
+        ctx.shadowColor = '#0284c7';
+        ctx.shadowBlur = 10 * chargeProgress;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(wandTipX, wandTipY, 6 + Math.sin(currentTime * 0.02) * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(186, 230, 253, ${chargeProgress})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Fire Bullet
+      if (target && timeSinceLastShot >= player.attackInterval) {
+        const wandLength = 22;
+        const wandTipX = player.x + Math.cos(player.aimAngle) * wandLength;
+        const wandTipY = player.y + Math.sin(player.aimAngle) * wandLength;
+
+        bullets.push({
+          x: wandTipX,
+          y: wandTipY,
+          vx: Math.cos(player.aimAngle) * player.bulletSpeed,
+          vy: Math.sin(player.aimAngle) * player.bulletSpeed,
+          radius: 6,
+          damage: player.bulletDamage,
+          distanceTraveled: 0,
+          maxRange: player.bulletRange,
+        });
+
+        player.lastShotTime = currentTime;
+      }
+
+      // Bullets Update & Hitboxes
       for (let bIndex = bullets.length - 1; bIndex >= 0; bIndex--) {
         const bullet = bullets[bIndex];
         const stepX = bullet.vx * dt;
@@ -326,9 +327,8 @@ export default function App() {
 
           if (dist < enemy.radius + bullet.radius) {
             enemy.hp -= bullet.damage;
-            enemy.hitTimer = 0.12; // Trigger red flash highlight on enemy
+            enemy.hitTimer = 0.12;
 
-            // Spawn Damage Text Popup
             damageTexts.push({
               x: enemy.x + (Math.random() - 0.5) * 16,
               y: enemy.y - 12,
@@ -337,7 +337,6 @@ export default function App() {
               lifetime: 0.6,
             });
 
-            // Spawn Air Bullet Impact Animation
             bulletImpacts.push({
               x: bullet.x,
               y: bullet.y,
@@ -380,7 +379,7 @@ export default function App() {
         }
       }
 
-      // 8. RENDER AIR BULLET IMPACT BURSTS
+      // Air Bullet Impacts
       for (let impIndex = bulletImpacts.length - 1; impIndex >= 0; impIndex--) {
         const impact = bulletImpacts[impIndex];
         impact.radius += (impact.maxRadius - impact.radius) * (dt / impact.lifetime);
@@ -399,11 +398,11 @@ export default function App() {
         }
       }
 
-      // 9. RENDER DAMAGE TEXT POPUPS
+      // Damage Numbers
       for (let dtIndex = damageTexts.length - 1; dtIndex >= 0; dtIndex--) {
         const dtObj = damageTexts[dtIndex];
-        dtObj.y -= 35 * dt; // Float upward
-        dtObj.alpha -= dt / dtObj.lifetime; // Fade out
+        dtObj.y -= 35 * dt;
+        dtObj.alpha -= dt / dtObj.lifetime;
 
         if (dtObj.alpha > 0) {
           ctx.save();
@@ -418,7 +417,7 @@ export default function App() {
         }
       }
 
-      // 10. DEATH GIF EXPIRATION
+      // Expire Death GIF Effects
       for (let dIndex = deathEffects.length - 1; dIndex >= 0; dIndex--) {
         const effect = deathEffects[dIndex];
         if (currentTime - effect.spawnTime >= effect.duration) {
@@ -427,32 +426,29 @@ export default function App() {
       }
       setActiveDeathEffects([...deathEffects]);
 
-      // 11. DROPPED COINS MAGNET & COLLECTION
+      // Coin Drops & Magnet
       for (let cIndex = droppedCoins.length - 1; cIndex >= 0; cIndex--) {
         const coin = droppedCoins[cIndex];
-        const dx = player.x - coin.x;
-        const dy = player.y - coin.y;
-        const dist = Math.hypot(dx, dy);
 
-        if (dist <= player.magnetRange) {
-          coin.speed = Math.min(500, coin.speed + 800 * dt);
-          coin.x += (dx / dist) * coin.speed * dt;
-          coin.y += (dy / dist) * coin.speed * dt;
-        }
+        updateCoinMagnet({
+          coin,
+          player,
+          dt,
+          stats,
+          coinsRef,
+          droppedCoins,
+          index: cIndex,
+        });
 
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#eab308';
-        ctx.fill();
-
-        if (dist < player.radius + coin.radius) {
-          stats.coins += 1;
-          if (coinsRef.current) coinsRef.current.textContent = stats.coins;
-          droppedCoins.splice(cIndex, 1);
+        if (droppedCoins[cIndex]) {
+          ctx.beginPath();
+          ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+          ctx.fillStyle = '#eab308';
+          ctx.fill();
         }
       }
 
-      // 12. ENEMIES UPDATE & HIT ANIMATION
+      // Enemies Logic & HP Bars
       for (let i = enemies.length - 1; i >= 0; i--) {
         const enemy = enemies[i];
 
@@ -465,7 +461,6 @@ export default function App() {
           enemy.y += (dy / distToPlayer) * enemy.speed * dt;
         }
 
-        // Hit flash overlay indicator on canvas
         if (enemy.hitTimer > 0) {
           enemy.hitTimer -= dt;
           ctx.save();
@@ -495,6 +490,10 @@ export default function App() {
             if (hpTextRef.current) hpTextRef.current.textContent = `${player.hp} / ${player.maxHp}`;
             if (hpBarRef.current) hpBarRef.current.style.width = `${(player.hp / player.maxHp) * 100}%`;
 
+            if (player.hp <= 0) {
+              setIsGameOver(true);
+            }
+
             enemy.lastAttackTime = currentTime;
           }
         }
@@ -502,64 +501,12 @@ export default function App() {
 
       setActiveEnemies([...enemies]);
 
-      // 13. DRAW PLAYER
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#6366f1';
-      ctx.fill();
+      // Render Player
+      renderPlayer(ctx, player);
 
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius * 0.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#e0e7ff';
-      ctx.fill();
-
-      // Wand
-      ctx.strokeStyle = '#854d0e';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(player.x + 10, player.y + 4);
-      ctx.lineTo(player.x + 22, player.y - 6);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(player.x + 23, player.y - 7, 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#0284c7';
-      ctx.fill();
-
+      // Render Minimap
       ctx.restore();
-
-      // 14. MINIMAP
-      const mmSize = 140;
-      const mmPadding = 16;
-      const mmX = canvas.width - mmSize - mmPadding;
-      const mmY = canvas.height - mmSize - mmPadding;
-      const scaleX = mmSize / WORLD_WIDTH;
-      const scaleY = mmSize / WORLD_HEIGHT;
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.fillRect(mmX, mmY, mmSize, mmSize);
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(mmX, mmY, mmSize, mmSize);
-
-      ctx.fillStyle = '#ef4444';
-      for (let i = 0; i < enemies.length; i++) {
-        const enemy = enemies[i];
-        ctx.beginPath();
-        ctx.arc(mmX + enemy.x * scaleX, mmY + enemy.y * scaleY, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.fillStyle = '#0284c7';
-      ctx.beginPath();
-      ctx.arc(mmX + player.x * scaleX, mmY + player.y * scaleY, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (player.hp > 0) {
-        animationFrameId = requestAnimationFrame(gameLoop);
-      } else {
-        setIsGameOver(true);
-      }
+      renderMinimap(ctx, canvas, WORLD_WIDTH, WORLD_HEIGHT, enemies, player);
     };
 
     animationFrameId = requestAnimationFrame(gameLoop);
@@ -574,51 +521,17 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen bg-slate-100 overflow-hidden select-none font-sans">
-      <canvas ref={canvasRef} className="block w-full h-full" />
+      <Canvas ref={canvasRef} />
 
-      {/* HTML OVERLAY FOR ANIMATED GIFS */}
+      {/* HTML OVERLAY FOR FULLY ANIMATED GIF SPRITES */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {activeEnemies.map((enemy) => {
-          const screenX = enemy.x - cameraPos.x - enemy.radius * 1.5;
-          const screenY = enemy.y - cameraPos.y - enemy.radius * 1.5;
-          const size = enemy.radius * 3;
+        {activeEnemies.map((enemy) => (
+          <Pitchling key={enemy.id} enemy={enemy} cameraPos={cameraPos} />
+        ))}
 
-          return (
-            <img
-              key={enemy.id}
-              src={enemy.spriteSrc}
-              alt="Pitchling"
-              className="absolute"
-              style={{
-                left: `${screenX}px`,
-                top: `${screenY}px`,
-                width: `${size}px`,
-                height: `${size}px`,
-              }}
-            />
-          );
-        })}
-
-        {activeDeathEffects.map((effect) => {
-          const screenX = effect.x - cameraPos.x - effect.radius * 1.5;
-          const screenY = effect.y - cameraPos.y - effect.radius * 1.5;
-          const size = effect.radius * 3;
-
-          return (
-            <img
-              key={effect.id}
-              src={effect.deathSpriteSrc}
-              alt="Dead Pitchling"
-              className="absolute"
-              style={{
-                left: `${screenX}px`,
-                top: `${screenY}px`,
-                width: `${size}px`,
-                height: `${size}px`,
-              }}
-            />
-          );
-        })}
+        {activeDeathEffects.map((effect) => (
+          <Pitchling key={effect.id} enemy={{ ...effect, isDead: true }} cameraPos={cameraPos} />
+        ))}
       </div>
 
       {/* TOP LEFT HUD */}
@@ -630,53 +543,21 @@ export default function App() {
           </p>
         </div>
 
-        <div className="w-56 bg-white/90 border border-slate-300 p-2 rounded-lg shadow-sm backdrop-blur-sm">
-          <div className="flex justify-between text-xs text-slate-700 font-bold mb-1">
-            <span>HP</span>
-            <span ref={hpTextRef}>100 / 100</span>
-          </div>
-          <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
-            <div
-              ref={hpBarRef}
-              className="bg-emerald-500 h-full transition-all duration-75"
-              style={{ width: '100%' }}
-            />
-          </div>
-        </div>
+        <PlayerHpbar hpTextRef={hpTextRef} hpBarRef={hpBarRef} />
       </div>
 
       {/* TOP RIGHT HUD */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-3 pointer-events-none">
-        <div className="flex items-center gap-2 bg-white/90 border border-slate-300 px-3 py-1.5 rounded-lg shadow-sm backdrop-blur-sm text-sm font-bold text-slate-700">
-          <span className="text-red-500">Kills:</span>
-          <span ref={killsRef} className="font-mono text-slate-900">0</span>
-        </div>
-
-        <div className="flex items-center gap-2 bg-white/90 border border-slate-300 px-3 py-1.5 rounded-lg shadow-sm backdrop-blur-sm text-sm font-bold text-slate-700">
-          <span className="text-amber-500">Coins:</span>
-          <span ref={coinsRef} className="font-mono text-slate-900">0</span>
-        </div>
-
-        <div className="flex items-center gap-2 bg-white/90 border border-slate-300 px-3 py-1.5 rounded-lg shadow-sm backdrop-blur-sm text-sm font-bold text-slate-700">
-          <span className="text-sky-600">Score:</span>
-          <span ref={scoreRef} className="font-mono text-slate-900">0</span>
-        </div>
+        <CountKills killsRef={killsRef} />
+        <CountCoins coinsRef={coinsRef} />
+        <CountScore scoreRef={scoreRef} />
       </div>
 
       {/* BOTTOM RIGHT FPS COUNTER */}
-      <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
-        <div className="bg-slate-900/80 text-emerald-400 font-mono text-xs font-bold px-2.5 py-1 rounded border border-slate-700 shadow-md">
-          <span ref={fpsRef}>60 FPS</span>
-        </div>
-      </div>
+      <FramerateCounter fpsRef={fpsRef} />
 
       {/* PAUSE OVERLAY */}
-      {isPaused && !isGameOver && (
-        <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-xs flex flex-col items-center justify-center text-slate-800 z-20 pointer-events-none">
-          <h2 className="text-4xl font-extrabold tracking-widest text-slate-900 mb-2">PAUSED</h2>
-          <p className="text-slate-700 text-sm font-medium">Press [TAB] to resume Wandershot</p>
-        </div>
-      )}
+      <Pause isPaused={isPaused} isGameOver={isGameOver} />
 
       {/* GAME OVER SCREEN */}
       {isGameOver && (
