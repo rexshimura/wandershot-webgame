@@ -1,6 +1,7 @@
 import React from 'react';
+import { DotLottiePlayer } from '@dotlottie/react-player';
 
-// Helper function handling magnet drift and pickup logic
+// Coin Magnet Drift & Collection Logic
 export function updateCoinMagnet({ coin, player, dt, stats, coinsRef, droppedCoins, index }) {
   const dx = player.x - coin.x;
   const dy = player.y - coin.y;
@@ -21,8 +22,15 @@ export function updateCoinMagnet({ coin, player, dt, stats, coinsRef, droppedCoi
 
 export default function CountCoins({ coinsRef }) {
   return (
-    <div className="flex items-center gap-2 bg-white/90 border border-slate-300 px-3 py-1.5 rounded-lg shadow-sm backdrop-blur-sm text-sm font-bold text-slate-700">
-      <span className="text-amber-500">Coins:</span>
+    <div className="flex items-center gap-1.5 bg-white/90 border border-slate-300 pl-1.5 pr-3 py-1 rounded-lg shadow-sm backdrop-blur-sm text-sm font-bold text-slate-700">
+      <div className="w-5 h-5 flex items-center justify-center pointer-events-none">
+        <DotLottiePlayer
+          src="/assets/coin.lottie"
+          autoplay
+          loop
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
       <span ref={coinsRef} className="font-mono text-slate-900">0</span>
     </div>
   );

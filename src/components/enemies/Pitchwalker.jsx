@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 
 export default function Pitchling({ enemy, cameraPos }) {
   const scale = enemy.spriteScale || 3.0;
@@ -6,12 +6,10 @@ export default function Pitchling({ enemy, cameraPos }) {
   const screenX = enemy.x - cameraPos.x - size / 2;
   const screenY = enemy.y - cameraPos.y - size / 2;
 
-  // Generate a unique URL per enemy instance to force independent GIF animation clocks
-  const animKey = useRef(enemy.id || Math.random().toString(36).substring(2, 9));
-
+  // Append unique query parameter to death GIF so it plays once from frame 0 on death
   const imgSrc = enemy.isDead
-    ? `${enemy.deathSpriteSrc}?death=${animKey.current}`
-    : `${enemy.spriteSrc}?anim=${animKey.current}`;
+    ? `${enemy.deathSpriteSrc}?death=${enemy.id}`
+    : enemy.spriteSrc;
 
   return (
     <img

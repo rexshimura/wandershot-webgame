@@ -9,4 +9,11 @@ export const PLAYER_CONFIG = {
   bulletRange: 400,
   magnetRange: 130,
   bulletSpeed: 550,
+  
+  // Upgrade defaults
+  spreadshot: 0,
+  multishot: 0,
+  pierce: 0,
+  bounce: 0,
+  trace: 0,
 };
