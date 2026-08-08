@@ -2,6 +2,7 @@ import React from 'react';
 import { getExpForNextLevel } from '../config/exp-config';
 
 export function updateExpMagnet({ orb, player, dt, playerState, hpBarRef, hpTextRef, expRef, expBarRef, levelRef, levelUpEffects, expOrbs, index, onLevelUp }) {
+  if (!orb) return;
   const dx = player.x - orb.x;
   const dy = player.y - orb.y;
   const dist = Math.hypot(dx, dy);

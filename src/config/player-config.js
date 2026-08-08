@@ -10,10 +10,5 @@ export const PLAYER_CONFIG = {
   magnetRange: 130,
   bulletSpeed: 550,
   
-  // Upgrade defaults
-  spreadshot: 0,
-  multishot: 0,
-  pierce: 0,
-  bounce: 0,
-  trace: 0,
+  // We now rely on classes-config.js for HP, Mana, Energy, and Damage!
 };

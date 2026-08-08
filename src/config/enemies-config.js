@@ -1,12 +1,12 @@
 export const ENEMY_TYPES = {
   PITCHLING: {
     name: 'Pitchling',
-    maxHp: 9,
-    speed: 80,
-    radius: 18,          // Collision hitbox size
-    spriteScale: 3.0,    // Visual sprite multiplier relative to radius
-    barWidth: 24,        // Overhead health bar width in pixels
-    contactDamage: 6,
+    maxHp: 60,
+    speed: 55, // slow movement
+    radius: 14,
+    spriteScale: 2.5,
+    barWidth: 20,
+    contactDamage: 15,
     attackInterval: 1000,
     scoreValue: 5,
     expValue: 2,
@@ -21,13 +21,14 @@ export const ENEMY_TYPES = {
   },
   PITCHWALKER: {
     name: 'Pitchwalker',
-    maxHp: 6,
-    speed: 160,
-    radius: 16,          // Collision hitbox size
-    spriteScale: 3.5,    // Pitchwalker sprite rendered slightly larger
-    barWidth: 28,        // Overhead health bar width
-    contactDamage: 8,
+    maxHp: 80,
+    speed: 130, // fast movement
+    radius: 12,
+    spriteScale: 3.0,
+    barWidth: 24,
+    contactDamage: 4,
     attackInterval: 1000,
+    behavior: 'ERRATIC', // Added erratic behavior flag
     scoreValue: 8,
     expValue: 4,
     spriteSrc: '/enemies/pitchwalker/pitchwalker.gif',

@@ -3,6 +3,7 @@ import { DotLottiePlayer } from '@dotlottie/react-player';
 
 // Coin Magnet Drift & Collection Logic
 export function updateCoinMagnet({ coin, player, dt, stats, coinsRef, droppedCoins, index }) {
+  if (!coin) return;
   const dx = player.x - coin.x;
   const dy = player.y - coin.y;
   const dist = Math.hypot(dx, dy);
