@@ -786,7 +786,7 @@ export default function App() {
       {/* TOP LEFT HUD */}
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-black text-slate-800 tracking-wider">WANDERSHOT</h1>
+          <h1 className="text-xl font-black text-slate-800 tracking-wider">WANDERSHOT V1</h1>
           
           {/* TAB PAUSE BUTTON */}
           <button
