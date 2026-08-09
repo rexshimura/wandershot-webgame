@@ -8,7 +8,6 @@ import SurvivalTimer, { formatTime } from './SurvivalTimer';
 import FramerateCounter from './FramerateCounter';
 import { renderMinimap } from './Minimap';
 import Pause from './Pause';
-import PlayerHpbar from './PlayerHpbar';
 import { ENEMY_TYPES } from '../config/enemies-config';
 import { createExpOrbs } from '../config/exp-config';
 import { renderPlayer } from '../entities/Player';
@@ -19,6 +18,15 @@ import SkillHUD from './SkillHUD';
 
 const WORLD_WIDTH = 3000;
 const WORLD_HEIGHT = 3000;
+
+const playAudio = (path, vol = 0.5, pitch = 1.0) => {
+  const audio = new Audio(path);
+  audio.volume = vol;
+  audio.playbackRate = pitch;
+  audio.preservesPitch = false; // Ensures changing playback rate alters pitch
+  audio.play().catch(() => {});
+  return audio;
+};
 
 export default function Game({ selectedClass, onGameOver, backToMenu }) {
   const canvasRef = useRef(null);
@@ -50,7 +58,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
   const cdRefs = {
     E: { overlay: useRef(null), text: useRef(null), box: useRef(null) },
     F: { overlay: useRef(null), text: useRef(null), box: useRef(null) },
-    C: { overlay: useRef(null), text: useRef(null), box: useRef(null) },
+    C: { overlay: useRef(null), text: useRef(null), box: useRef(null), badge: useRef(null) },
     X: { overlay: useRef(null), text: useRef(null), box: useRef(null) },
     Q: { overlay: useRef(null), text: useRef(null), box: useRef(null) },
   };
@@ -102,13 +110,15 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         aimingSkill = null;
         return;
       }
-      if (aimingSkill) {
+      if (aimingSkill && aimingSkill !== 'APPRENTICE_F') {
         if (aimingSkill === 'APPRENTICE_E') {
           const cost = playerRef.current.skills.E.cost;
           if (playerRef.current.mana >= cost.mana && playerRef.current.energy >= cost.energy) {
             playerRef.current.mana -= cost.mana;
             playerRef.current.energy -= cost.energy;
             playerRef.current.cdE = playerRef.current.skills.E.cd;
+            playAudio('/sfx/apprentice/mana-orb-release.mp3', 0.6);
+            playAudio('/sfx/apprentice/mana-orb-release-2.mp3', 0.6);
             bullets.push({
               x: playerRef.current.x, y: playerRef.current.y,
               vx: Math.cos(playerRef.current.aimAngle) * 150, vy: Math.sin(playerRef.current.aimAngle) * 150,
@@ -122,11 +132,15 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
             playerRef.current.mana -= cost.mana;
             playerRef.current.energy -= cost.energy;
             playerRef.current.cdX = playerRef.current.skills.X.cd;
+            const expandAudio = playAudio('/sfx/apprentice/condensed-beam-release.mp3', 0.0);
             bullets.push({
               x: playerRef.current.x, y: playerRef.current.y,
               angle: playerRef.current.aimAngle,
               type: 'BEAM',
               duration: 2.3,
+              chargeTime: 0.6,
+              expandAudio: null,
+              audioRefs: [expandAudio],
               tickTimer: 0,
               tickInterval: 2.3 / 12,
               tickCount: 0,
@@ -175,7 +189,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       const playerCanvasY = canvas.height / 2;
       
       if (playerRef.current) {
-        playerRef.current.aimAngle = Math.atan2(mouseY - playerCanvasY, mouseX - playerCanvasX);
+        playerRef.current.mouseAimAngle = Math.atan2(mouseY - playerCanvasY, mouseX - playerCanvasX);
       }
     };
 
@@ -199,6 +213,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       magnetRange: 130,
       lastShotTime: 0,
       aimAngle: 0,
+      mouseAimAngle: 0,
       radius: 16,
       cdE: 0, cdF: 0, cdC: 0, cdX: 0, cdQ: 0,
       damageMultiplier: 1.0,
@@ -224,6 +239,11 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
     let frameCount = 0;
     let lastFpsUpdateTime = performance.now();
     let currentTimeRef = { current: performance.now() };
+    
+    let chargeStartTimeF = 0;
+    
+    let teleportDelay = 0;
+    let pendingTeleport = { x: 0, y: 0 };
 
     let dashOffset = { x: 0, y: 0 };
     let isDashing = false;
@@ -276,6 +296,9 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
     };
 
     const fireApprenticeBullet = (p) => {
+      const randomPitch = 1.3 + Math.random() * 0.3; // Pitch between 1.3x and 1.6x (faster)
+      playAudio('/sfx/apprentice/basic-attack.mp3', 0.15, randomPitch);
+      playAudio('/sfx/apprentice/mana-gun-release.mp3', 0.05, 0.4); // Deep, quiet charging sound for the cooldown
       bullets.push({
         x: p.x + Math.cos(p.aimAngle) * 22,
         y: p.y + Math.sin(p.aimAngle) * 22,
@@ -330,21 +353,47 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       if (player.cdC > 0) player.cdC -= dt;
       if (player.cdX > 0) player.cdX -= dt;
 
-      const updateCdUI = (key, currentCd, maxCd) => {
+      const activeTurretsCount = turrets.filter(t => t.owner === player).length;
+
+      const updateCdUI = (key, currentCd, maxCd, forceDisabled = false, lockText = 'MAX') => {
         if (cdRefs[key] && cdRefs[key].overlay.current) {
-          const pct = currentCd > 0 ? (currentCd / maxCd) * 100 : 0;
+          const pct = (currentCd > 0 || forceDisabled) ? (currentCd > 0 ? (currentCd / maxCd) * 100 : 100) : 0;
           cdRefs[key].overlay.current.style.height = `${pct}%`;
+          if (forceDisabled && currentCd <= 0) {
+            cdRefs[key].overlay.current.style.backgroundColor = 'rgba(15, 23, 42, 0.75)';
+          } else {
+            cdRefs[key].overlay.current.style.backgroundColor = 'rgba(15, 23, 42, 0.6)';
+          }
         }
         if (cdRefs[key] && cdRefs[key].text.current) {
-          cdRefs[key].text.current.textContent = currentCd > 0 ? Math.ceil(currentCd) : '';
+          if (forceDisabled && currentCd <= 0) {
+            cdRefs[key].text.current.textContent = lockText;
+            cdRefs[key].text.current.style.fontSize = '12px';
+          } else {
+            cdRefs[key].text.current.textContent = currentCd > 0 ? Math.ceil(currentCd) : '';
+            cdRefs[key].text.current.style.fontSize = '';
+          }
         }
       };
       
       updateCdUI('Q', player.cdQ, player.skills.Q.cd);
-      updateCdUI('E', player.cdE, player.skills.E.cd);
-      if (player.skills.F) updateCdUI('F', player.cdF, player.skills.F.cd);
-      updateCdUI('C', player.cdC, player.skills.C.cd);
-      updateCdUI('X', player.cdX, player.skills.X.cd);
+      updateCdUI('E', player.cdE, player.skills.E.cd, selectedClass === 'APPRENTICE' && playerState.level < 12, 'Lv.12');
+      if (player.skills.F) updateCdUI('F', player.cdF, player.skills.F.cd, selectedClass === 'APPRENTICE' && playerState.level < 7, 'Lv.7');
+      const maxTurretsUI = playerState.level >= 16 ? 3 : (playerState.level >= 5 ? 2 : 1);
+      const cCdUI = playerState.level >= 16 ? 3.5 : player.skills.C.cd;
+      updateCdUI('C', player.cdC, cCdUI, selectedClass === 'APPRENTICE' && activeTurretsCount >= maxTurretsUI, 'MAX');
+      updateCdUI('X', player.cdX, player.skills.X.cd, selectedClass === 'APPRENTICE' && playerState.level < 20, 'Lv.20');
+      
+      if (cdRefs['C'] && cdRefs['C'].badge.current) {
+        if (selectedClass === 'APPRENTICE') {
+          cdRefs['C'].badge.current.style.display = 'flex';
+          const remaining = Math.max(0, maxTurretsUI - activeTurretsCount);
+          cdRefs['C'].badge.current.textContent = remaining;
+          cdRefs['C'].badge.current.style.backgroundColor = remaining === 0 ? '#ef4444' : '#3b82f6';
+        } else {
+          cdRefs['C'].badge.current.style.display = 'none';
+        }
+      }
 
       // Highlight active skill box
       ['Q', 'E', 'F', 'C', 'X'].forEach(key => {
@@ -357,6 +406,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         let activeKey = null;
         if (aimingSkill === 'APPRENTICE_E') activeKey = 'E';
         if (aimingSkill === 'APPRENTICE_X' || aimingSkill === 'SQUIRE_X') activeKey = 'X';
+        if (aimingSkill === 'APPRENTICE_F') activeKey = 'F';
         if (activeKey && cdRefs[activeKey].box.current) {
           cdRefs[activeKey].box.current.style.borderColor = '#3b82f6'; // blue-500
           cdRefs[activeKey].box.current.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.8)';
@@ -400,29 +450,73 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       if (keys['KeyQ'] && player.cdQ <= 0 && player.energy >= player.skills.Q.cost.energy) {
         player.energy -= player.skills.Q.cost.energy;
         player.cdQ = player.skills.Q.cd;
-        isDashing = true;
+        
         let dx = vx; let dy = vy;
         if (dx === 0 && dy === 0) {
           dx = Math.cos(player.aimAngle);
           dy = Math.sin(player.aimAngle);
         }
-        dashOffset = { x: dx * 200, y: dy * 200 };
+
+        if (selectedClass === 'APPRENTICE') {
+          playAudio('/sfx/apprentice/teleport.mp3', 0.5);
+          teleportDelay = 0.15; // Delay before teleporting
+          pendingTeleport = { x: dx * 350, y: dy * 350 };
+          player.teleporting = true;
+        } else {
+          isDashing = true;
+          dashOffset = { x: dx * 200, y: dy * 200 };
+        }
+      }
+      
+      if (teleportDelay > 0) {
+        teleportDelay -= dt;
+        for (let i = 0; i < 2; i++) {
+          meleeHits.push({
+            x: player.x + (Math.random() - 0.5) * 50,
+            y: player.y + (Math.random() - 0.5) * 50,
+            radius: 4 + Math.random() * 6,
+            damage: 0,
+            lifetime: 0.25,
+            color: 'rgba(192, 132, 252, 0.8)'
+          });
+        }
+        if (teleportDelay <= 0) {
+          isDashing = true;
+          dashOffset = pendingTeleport;
+        }
       }
 
       if (isDashing) {
-        player.x += dashOffset.x * dt * 10;
-        player.y += dashOffset.y * dt * 10;
-        dashOffset.x -= dashOffset.x * dt * 10;
-        dashOffset.y -= dashOffset.y * dt * 10;
-        if (Math.hypot(dashOffset.x, dashOffset.y) < 10) isDashing = false;
+        const dashSpeed = player.teleporting ? 20 : 10;
+        player.x += dashOffset.x * dt * dashSpeed;
+        player.y += dashOffset.y * dt * dashSpeed;
+        dashOffset.x -= dashOffset.x * dt * dashSpeed;
+        dashOffset.y -= dashOffset.y * dt * dashSpeed;
+        if (Math.hypot(dashOffset.x, dashOffset.y) < 10) {
+          isDashing = false;
+          player.teleporting = false;
+        }
         
-        meleeHits.push({
-          x: player.x, y: player.y, radius: player.radius, damage: 0,
-          lifetime: 0.15, color: 'rgba(59, 130, 246, 0.4)'
-        });
-      } else if (!isBeamActive) {
-        player.x += vx * player.speed * dt;
-        player.y += vy * player.speed * dt;
+        if (player.teleporting) {
+          for (let i = 0; i < 2; i++) {
+            meleeHits.push({
+              x: player.x + (Math.random() - 0.5) * 20, 
+              y: player.y + (Math.random() - 0.5) * 20, 
+              radius: 12 + Math.random() * 8, damage: 0,
+              lifetime: 0.3 + Math.random() * 0.2, 
+              color: 'rgba(192, 132, 252, 0.7)'
+            });
+          }
+        } else {
+          meleeHits.push({
+            x: player.x, y: player.y, radius: player.radius, damage: 0,
+            lifetime: 0.15, color: 'rgba(59, 130, 246, 0.4)'
+          });
+        }
+      } else if (teleportDelay <= 0) {
+        const currentSpeed = isBeamActive ? player.speed * 0.2 : player.speed;
+        player.x += vx * currentSpeed * dt;
+        player.y += vy * currentSpeed * dt;
       }
 
       player.x = Math.max(0, Math.min(WORLD_WIDTH, player.x));
@@ -434,13 +528,31 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         const t = turrets[i];
         t.duration -= dt;
         if (t.duration <= 0) {
-          t.owner.cdC = t.owner.skills.C.cd; // Start cooldown
+          // Spawn death particles
+          for(let p = 0; p < 10; p++) {
+             meleeHits.push({
+                x: t.x + (Math.random() - 0.5) * 30, 
+                y: t.y + (Math.random() - 0.5) * 30,
+                radius: 3 + Math.random() * 5, damage: 0,
+                lifetime: 0.2 + Math.random() * 0.3, color: 'rgba(56, 189, 248, 0.9)'
+             });
+          }
           turrets.splice(i, 1);
           continue;
         }
         
-        const desiredX = t.owner.x - 50;
-        const desiredY = t.owner.y - 50;
+        // Orbit logic
+        const myTurrets = turrets.filter(tr => tr.owner === t.owner);
+        const myIndex = myTurrets.indexOf(t);
+        
+        const orbitRadius = 70;
+        const orbitSpeed = 1.5; // radians per second
+        const angleOffset = (myIndex / myTurrets.length) * Math.PI * 2;
+        const orbitAngle = (currentTime / 1000) * orbitSpeed + angleOffset;
+        
+        const desiredX = t.owner.x + Math.cos(orbitAngle) * orbitRadius;
+        const desiredY = t.owner.y + Math.sin(orbitAngle) * orbitRadius;
+        
         t.x += (desiredX - t.x) * 5 * dt;
         t.y += (desiredY - t.y) * 5 * dt;
 
@@ -453,6 +565,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           }
           if (nearest) {
             t.angle = Math.atan2(nearest.y - t.y, nearest.x - t.x);
+            playAudio('/sfx/apprentice/mana-gun-shoot.mp3', 0.15);
             bullets.push({
               x: t.x, y: t.y,
               vx: Math.cos(t.angle) * 1000, vy: Math.sin(t.angle) * 1000,
@@ -468,7 +581,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         if (selectedClass === 'APPRENTICE') {
           if (aimingSkill === 'APPRENTICE_E') {
             aimingSkill = null;
-          } else if (player.cdE <= 0 && player.mana >= player.skills.E.cost.mana && player.energy >= player.skills.E.cost.energy) {
+          } else if (playerState.level >= 12 && player.cdE <= 0 && player.mana >= player.skills.E.cost.mana && player.energy >= player.skills.E.cost.energy) {
             aimingSkill = 'APPRENTICE_E';
           }
         } else if (selectedClass === 'SQUIRE' && player.cdE <= 0 && player.mana >= player.skills.E.cost.mana && player.energy >= player.skills.E.cost.energy) {
@@ -481,36 +594,50 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         keys['KeyE'] = false;
       }
       
-      if (keys['KeyF']) {
-        if (selectedClass === 'APPRENTICE' && player.cdF <= 0 && player.mana >= player.skills.F.cost.mana && player.energy >= player.skills.F.cost.energy) {
+      if (selectedClass === 'APPRENTICE') {
+        if (keys['KeyF']) {
+          if (aimingSkill !== 'APPRENTICE_F' && playerState.level >= 7 && player.cdF <= 0 && player.mana >= player.skills.F.cost.mana && player.energy >= player.skills.F.cost.energy) {
+            aimingSkill = 'APPRENTICE_F';
+            chargeStartTimeF = currentTime;
+          }
+        } else if (aimingSkill === 'APPRENTICE_F') {
+          // Fire when released
           player.mana -= player.skills.F.cost.mana;
           player.energy -= player.skills.F.cost.energy;
           player.cdF = player.skills.F.cd;
+          playAudio('/sfx/apprentice/mana-push-release.mp3', 0.7);
+          
+          const chargeTime = currentTime - chargeStartTimeF;
+          const finalRadius = Math.min(350, 100 + (chargeTime * 0.25));
+
           bullets.push({
             x: player.x, y: player.y,
             type: 'MANA_PUSH',
             radius: 0,
-            maxRadius: 250,
+            maxRadius: finalRadius,
             duration: 0.3,
             tickTimer: 0,
             tickInterval: 0.1,
-            damage: 8 * player.damageMultiplier,
+            damage: 8 * player.damageMultiplier * (finalRadius / 250),
             hitList: new Map(),
             vx: 0,
             vy: 0
           });
+          aimingSkill = null;
         }
-        keys['KeyF'] = false;
       }
 
       if (keys['KeyC']) {
-        const activeTurret = turrets.find(t => t.owner === player);
-        if (selectedClass === 'APPRENTICE' && !activeTurret && player.cdC <= 0 && player.mana >= player.skills.C.cost.mana && player.energy >= player.skills.C.cost.energy) {
+        const activeTurretsCount = turrets.filter(t => t.owner === player).length;
+        const maxTurrets = playerState.level >= 16 ? 3 : (playerState.level >= 5 ? 2 : 1);
+        if (selectedClass === 'APPRENTICE' && activeTurretsCount < maxTurrets && player.cdC <= 0 && player.mana >= player.skills.C.cost.mana && player.energy >= player.skills.C.cost.energy) {
           player.mana -= player.skills.C.cost.mana;
           player.energy -= player.skills.C.cost.energy;
+          player.cdC = playerState.level >= 16 ? 3.5 : player.skills.C.cd; // Trigger cooldown
+          playAudio('/sfx/apprentice/mana-gun-release.mp3', 0.6);
           turrets.push({
             owner: player, x: player.x, y: player.y,
-            duration: 5.0, range: 450, lastShotTime: 0, fireRate: 0.25, angle: 0
+            duration: 15.0, range: 450, lastShotTime: 0, fireRate: 0.25, angle: 0
           });
         } else if (selectedClass === 'SQUIRE' && player.cdC <= 0 && player.mana >= player.skills.C.cost.mana && player.energy >= player.skills.C.cost.energy) {
           player.mana -= player.skills.C.cost.mana;
@@ -526,7 +653,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         if (selectedClass === 'APPRENTICE') {
           if (aimingSkill === 'APPRENTICE_X') {
             aimingSkill = null;
-          } else if (player.cdX <= 0 && player.mana >= player.skills.X.cost.mana && player.energy >= player.skills.X.cost.energy) {
+          } else if (playerState.level >= 20 && player.cdX <= 0 && player.mana >= player.skills.X.cost.mana && player.energy >= player.skills.X.cost.energy) {
             aimingSkill = 'APPRENTICE_X';
           }
         } else if (selectedClass === 'SQUIRE') {
@@ -539,14 +666,32 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         keys['KeyX'] = false;
       }
 
-      // Basic Attack Logic
+      // Aiming & Basic Attack Logic
+      let attackTarget = null;
+      let shouldAttack = false;
+
+      if (selectedClass === 'APPRENTICE') {
+        if (!aimingSkill) {
+          if (autoAttackRef.current) {
+            attackTarget = getNearestEnemy();
+            shouldAttack = !!attackTarget;
+          } else {
+            shouldAttack = isMouseDown;
+          }
+        }
+      }
+
+      if (aimingSkill || isBeamActive) {
+        player.aimAngle = player.mouseAimAngle !== undefined ? player.mouseAimAngle : player.aimAngle;
+      } else if (autoAttackRef.current && attackTarget) {
+        player.aimAngle = Math.atan2(attackTarget.y - player.y, attackTarget.x - player.x);
+      } else {
+        player.aimAngle = player.mouseAimAngle !== undefined ? player.mouseAimAngle : player.aimAngle;
+      }
+
       const timeSinceLastShot = currentTime - player.lastShotTime;
       if (selectedClass === 'APPRENTICE') {
-        const shouldAttack = autoAttackRef.current ? getNearestEnemy() : (isMouseDown && !aimingSkill);
         if (shouldAttack && timeSinceLastShot >= player.attackInterval) {
-          if (autoAttackRef.current && shouldAttack.x !== undefined) {
-             player.aimAngle = Math.atan2(shouldAttack.y - player.y, shouldAttack.x - player.x);
-          }
           fireApprenticeBullet(player);
           player.lastShotTime = currentTime;
         }
@@ -583,12 +728,64 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
 
       renderPlayer(ctx, player, selectedClass);
 
+      // Basic Attack Charge Indicator
+      if (selectedClass === 'APPRENTICE') {
+        const timeSinceLastShot = currentTime - player.lastShotTime;
+        if (timeSinceLastShot < player.attackInterval) {
+          const progress = timeSinceLastShot / player.attackInterval;
+          const wandLength = 22;
+          const wandTipX = player.x + Math.cos(player.aimAngle) * wandLength;
+          const wandTipY = player.y + Math.sin(player.aimAngle) * wandLength;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(wandTipX, wandTipY, progress * 5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(14, 165, 233, ${progress})`; // sky-500
+          ctx.shadowColor = '#0ea5e9';
+          ctx.shadowBlur = 10 * progress;
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      if (aimingSkill === 'APPRENTICE_F') {
+        const chargeTime = currentTime - chargeStartTimeF;
+        const currentRadius = Math.min(350, 100 + (chargeTime * 0.25));
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, currentRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(96, 165, 250, 0.1)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(96, 165, 250, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       // Draw Beams
       for (let b of bullets) {
         if (b.type === 'BEAM') {
           ctx.save();
           ctx.translate(b.x, b.y);
           ctx.rotate(b.angle);
+          
+          if (b.chargeTime > 0) {
+            const progress = 1 - (b.chargeTime / 0.6);
+            ctx.beginPath();
+            ctx.arc(30, 0, 10 + progress * 20, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(139, 92, 246, ${progress})`;
+            ctx.fill();
+            for(let i=0; i<4; i++) {
+              ctx.beginPath();
+              const angle = Math.random() * Math.PI * 2;
+              const dist = 40 * (1 - progress) + Math.random() * 10;
+              ctx.arc(30 + Math.cos(angle)*dist, Math.sin(angle)*dist, 2, 0, Math.PI*2);
+              ctx.fillStyle = '#ffffff';
+              ctx.fill();
+            }
+            ctx.restore();
+            continue;
+          }
           
           const timeActive = 2.3 - b.duration;
           const currentWidth = Math.max(4, Math.min(b.width, b.width * (timeActive / 0.8)));
@@ -643,6 +840,13 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         ctx.fillStyle = '#bae6fd'; // barrel
         ctx.fillRect(0, -5, 22, 10);
         ctx.restore();
+        
+        // Countdown timer bar
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(t.x - 16, t.y - 30, 32, 5);
+        ctx.fillStyle = '#38bdf8'; // sky-400
+        const pct = Math.max(0, t.duration / 15.0); // 15s max duration
+        ctx.fillRect(t.x - 16, t.y - 30, 32 * pct, 5);
       }
 
       // Spawning
@@ -731,10 +935,39 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         if (bullet.type === 'BEAM') {
           bullet.x = player.x;
           bullet.y = player.y;
-          // Optionally track mouse during firing
-          // bullet.angle = player.aimAngle;
+          bullet.angle = player.aimAngle;
+          
+          if (bullet.chargeTime > 0) {
+            bullet.chargeTime -= dt;
+            
+            if (bullet.expandAudio) {
+               const p = 1 - (bullet.chargeTime / 0.6);
+               bullet.expandAudio.volume = Math.max(0, Math.min(0.3, p * 0.3));
+            }
+
+            if (bullet.chargeTime <= 0) {
+              const a1 = playAudio('/sfx/apprentice/condensed-beam-release.mp3', 0.0);
+              bullet.audioRefs = [a1];
+            }
+            continue;
+          }
           
           bullet.duration -= dt;
+          
+          if (bullet.audioRefs) {
+            const timeActive = 2.3 - bullet.duration;
+            let targetVol = 0.4;
+            if (timeActive < 0.2) targetVol = (timeActive / 0.2) * 0.4;
+            else if (bullet.duration < 0.2) targetVol = (bullet.duration / 0.2) * 0.4;
+            targetVol = Math.max(0, Math.min(0.4, targetVol));
+            bullet.audioRefs.forEach(a => {
+              if (a) a.volume = targetVol;
+            });
+            if (bullet.expandAudio) {
+              bullet.expandAudio.volume = targetVol * (0.3 / 0.4);
+            }
+          }
+
           bullet.tickTimer -= dt;
           if (bullet.tickTimer <= 0) {
             bullet.tickTimer += bullet.tickInterval;
@@ -767,6 +1000,18 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
             if (bullet.tickCount !== undefined) bullet.tickCount++;
           }
           if (bullet.duration <= 0) {
+            if (bullet.audioRefs) {
+               bullet.audioRefs.forEach(a => {
+                   if (a) {
+                     a.pause();
+                     a.currentTime = 0;
+                   }
+               });
+            }
+            if (bullet.expandAudio) {
+               bullet.expandAudio.pause();
+               bullet.expandAudio.currentTime = 0;
+            }
             bullets.splice(b, 1);
           }
           continue; // Skip the rest of bullet logic for BEAM
@@ -842,6 +1087,15 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
               e.y += (dy / dist) * pullForce * dt;
             }
           }
+          
+          // Draw suction radius indicator
+          ctx.beginPath();
+          ctx.arc(bullet.x, bullet.y, pullRange, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.2)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
         }
 
         if (bullet.type === 'MANA_ORB') {
@@ -880,6 +1134,42 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           ctx.stroke();
           ctx.fillStyle = `rgba(96, 165, 250, ${Math.max(0, (bullet.duration / 0.3) * 0.3)})`;
           ctx.fill();
+        } else if (bullet.type === 'WIND') {
+          const currentAngle = Math.atan2(bullet.vy, bullet.vx);
+          
+          // Thin glowing tail
+          ctx.beginPath();
+          ctx.moveTo(bullet.x, bullet.y);
+          ctx.lineTo(bullet.x - Math.cos(currentAngle) * 40, bullet.y - Math.sin(currentAngle) * 40);
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          
+          // Extremely sharp head
+          ctx.save();
+          ctx.translate(bullet.x, bullet.y);
+          ctx.rotate(currentAngle);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = '#0ea5e9';
+          ctx.shadowBlur = 15;
+          ctx.beginPath();
+          ctx.moveTo(20, 0); // Very sharp elongated tip
+          ctx.lineTo(0, 3);
+          ctx.lineTo(-8, 0);
+          ctx.lineTo(0, -3);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          
+          // Dense particle trail
+          for(let i = 0; i < 2; i++) {
+            meleeHits.push({
+              x: bullet.x - Math.cos(currentAngle) * (10 + Math.random() * 20) + (Math.random() - 0.5) * 12, 
+              y: bullet.y - Math.sin(currentAngle) * (10 + Math.random() * 20) + (Math.random() - 0.5) * 12, 
+              radius: 2 + Math.random() * 4, damage: 0,
+              lifetime: 0.2 + Math.random() * 0.15, color: 'rgba(56, 189, 248, 0.9)'
+            });
+          }
         } else {
           ctx.beginPath();
           ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
@@ -891,6 +1181,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           bullet.duration -= dt;
           if (bullet.duration <= 0) {
             if (bullet.type === 'MANA_ORB') {
+              playAudio('/sfx/apprentice/mana-orb-explode.mp3', 0.8);
               meleeHits.push({
                 x: bullet.x, y: bullet.y, radius: 150, damage: bullet.baseDamage, lifetime: 0.2, color: 'rgba(59, 130, 246, 0.7)'
               });
@@ -1116,40 +1407,53 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
     >
       <Canvas ref={canvasRef} />
 
-      {/* TOP LEFT HUD */}
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
-        <PlayerHpbar hpBarRef={hpBarRef} hpTextRef={hpTextRef} maxHp={CLASSES[selectedClass]?.maxHp || 100} />
-        
-        {/* Mana Bar (Segmented) */}
-        <div className="w-56 bg-white/90 border border-slate-300 p-2 rounded-lg shadow-sm backdrop-blur-sm -mt-1">
-          <div className="flex justify-between text-xs text-slate-700 font-bold mb-1">
-            <span>Mana</span>
-            <span ref={manaTextRef}>{CLASSES[selectedClass]?.maxMana} / {CLASSES[selectedClass]?.maxMana}</span>
-          </div>
-          <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden relative">
-            <div ref={manaBarRef} className="bg-blue-500 h-full transition-all duration-75" style={{ width: '100%' }} />
-            <div className="absolute inset-0 flex justify-between pointer-events-none">
-              {Array.from({ length: CLASSES[selectedClass]?.maxMana - 1 || 0 }).map((_, i) => (
-                <div key={i} className="h-full w-[1px] bg-slate-900/20" />
-              ))}
+      {/* TOP LEFT HUD (Unified Resources) */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none w-64">
+        <div className="bg-white/90 border border-slate-200 p-4 rounded-xl shadow-lg backdrop-blur-md flex flex-col gap-3">
+          
+          {/* HP Bar */}
+          <div>
+            <div className="flex justify-between text-xs text-slate-500 font-bold mb-1 uppercase tracking-wider">
+              <span>HP</span>
+              <span ref={hpTextRef} className="text-rose-500">{CLASSES[selectedClass]?.maxHp || 100} / {CLASSES[selectedClass]?.maxHp || 100}</span>
+            </div>
+            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden shadow-inner">
+              <div ref={hpBarRef} className="bg-rose-500 h-full transition-all duration-75" style={{ width: '100%' }} />
             </div>
           </div>
-        </div>
 
-        {/* Energy Bar (Segmented) */}
-        <div className="w-56 bg-white/90 border border-slate-300 p-2 rounded-lg shadow-sm backdrop-blur-sm -mt-1">
-          <div className="flex justify-between text-xs text-slate-700 font-bold mb-1">
-            <span>Energy</span>
-            <span ref={energyTextRef}>{CLASSES[selectedClass]?.maxEnergy} / {CLASSES[selectedClass]?.maxEnergy}</span>
-          </div>
-          <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden relative">
-            <div ref={energyBarRef} className="bg-amber-500 h-full transition-all duration-75" style={{ width: '100%' }} />
-            <div className="absolute inset-0 flex justify-between pointer-events-none">
-              {Array.from({ length: CLASSES[selectedClass]?.maxEnergy - 1 || 0 }).map((_, i) => (
-                <div key={i} className="h-full w-[1px] bg-slate-900/20" />
-              ))}
+          {/* Mana Bar */}
+          <div>
+            <div className="flex justify-between text-xs text-slate-500 font-bold mb-1 uppercase tracking-wider">
+              <span>Mana</span>
+              <span ref={manaTextRef} className="text-blue-500">{CLASSES[selectedClass]?.maxMana} / {CLASSES[selectedClass]?.maxMana}</span>
+            </div>
+            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden shadow-inner relative">
+              <div ref={manaBarRef} className="bg-blue-500 h-full transition-all duration-75" style={{ width: '100%' }} />
+              <div className="absolute inset-0 flex justify-between pointer-events-none">
+                {Array.from({ length: Math.max(0, (CLASSES[selectedClass]?.maxMana || 1) - 1) }).map((_, i) => (
+                  <div key={i} className="h-full w-[1px] bg-white/30" />
+                ))}
+              </div>
             </div>
           </div>
+
+          {/* Energy Bar */}
+          <div>
+            <div className="flex justify-between text-xs text-slate-500 font-bold mb-1 uppercase tracking-wider">
+              <span>Energy</span>
+              <span ref={energyTextRef} className="text-amber-500">{CLASSES[selectedClass]?.maxEnergy} / {CLASSES[selectedClass]?.maxEnergy}</span>
+            </div>
+            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden shadow-inner relative">
+              <div ref={energyBarRef} className="bg-amber-500 h-full transition-all duration-75" style={{ width: '100%' }} />
+              <div className="absolute inset-0 flex justify-between pointer-events-none">
+                {Array.from({ length: Math.max(0, (CLASSES[selectedClass]?.maxEnergy || 1) - 1) }).map((_, i) => (
+                  <div key={i} className="h-full w-[1px] bg-white/30" />
+                ))}
+              </div>
+            </div>
+          </div>
+
         </div>
 
         <div className="mt-2 flex flex-col gap-1 pointer-events-auto w-fit">

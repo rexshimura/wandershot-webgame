@@ -34,6 +34,14 @@ export default function SkillHUD({ selectedClass, cdRefs }) {
               className="absolute inset-0 flex items-center justify-center text-xl font-black text-white z-40 drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]"
             >
             </div>
+            {/* Custom Badge */}
+            {cdRefs[key].badge && (
+              <div
+                ref={cdRefs[key].badge}
+                className="absolute -top-1 -right-1 text-white text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shadow border-2 border-white z-50 hidden transition-colors"
+              >
+              </div>
+            )}
           </div>
         );
       })}
