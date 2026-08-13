@@ -220,6 +220,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       buffTimer: 0,
       isSpinning: false,
       spinTimer: 0,
+      slowDebuff: 0,
     };
     const player = playerRef.current;
 
@@ -418,6 +419,10 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         if (player.buffTimer <= 0) player.damageMultiplier = 1.0;
       }
       
+      if (player.slowDebuff > 0) {
+        player.slowDebuff -= dt;
+      }
+      
       if (player.isSpinning) {
         player.spinTimer -= dt;
         if (player.spinTimer <= 0) player.isSpinning = false;
@@ -514,7 +519,8 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           });
         }
       } else if (teleportDelay <= 0) {
-        const currentSpeed = isBeamActive ? player.speed * 0.2 : player.speed;
+        let currentSpeed = isBeamActive ? player.speed * 0.2 : player.speed;
+        if (player.slowDebuff > 0) currentSpeed *= 0.6; // 40% slow
         player.x += vx * currentSpeed * dt;
         player.y += vy * currentSpeed * dt;
       }
@@ -865,7 +871,10 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
       };
 
       if (currentTime - lastSpawnTime > 2000) {
-        const types = Object.keys(ENEMY_TYPES);
+        let types = Object.keys(ENEMY_TYPES);
+        if (playerState.level < 5) {
+          types = types.filter(t => t !== 'PITCHSTUD');
+        }
         spawnEnemy(types[Math.floor(Math.random() * types.length)]);
         lastSpawnTime = currentTime;
       }
@@ -1224,8 +1233,14 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         if (dist > e.radius + player.radius) {
           const statusSlow = e.slowTimer > 0 ? 0.5 : 1.0;
           const slowMult = isBeamActive ? 0.15 : 1.0;
-          let moveX = (dx / dist) * e.speed * slowMult * statusSlow * dt;
-          let moveY = (dy / dist) * e.speed * slowMult * statusSlow * dt;
+          
+          let currentSpeed = e.speed;
+          if (e.typeKey === 'PITCHSTUD' && e.hp < e.maxHp * 0.5) {
+            currentSpeed *= 1.8; // 80% faster when enraged
+          }
+          
+          let moveX = (dx / dist) * currentSpeed * slowMult * statusSlow * dt;
+          let moveY = (dy / dist) * currentSpeed * slowMult * statusSlow * dt;
           
           if (e.behavior === 'ERRATIC') {
             const wobble = Math.sin(currentTime / 150 + parseFloat(e.id) * 100) * 120 * slowMult * statusSlow * dt;
@@ -1237,6 +1252,9 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           e.y += moveY;
         } else if (currentTime - e.lastAttackTime >= 1000) {
           player.hp -= e.contactDamage;
+          if (e.typeKey === 'PITCHSTUD') {
+            player.slowDebuff = 2.0;
+          }
           e.lastAttackTime = currentTime;
           if (hpTextRef.current) hpTextRef.current.textContent = `${Math.floor(player.hp)} / ${player.maxHp}`;
           if (hpBarRef.current) hpBarRef.current.style.width = `${(player.hp / player.maxHp) * 100}%`;

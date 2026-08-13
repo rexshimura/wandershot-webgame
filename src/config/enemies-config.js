@@ -40,4 +40,23 @@ export const ENEMY_TYPES = {
       return 1;
     },
   },
+  PITCHSTUD: {
+    name: 'Pitchstud',
+    maxHp: 300,
+    speed: 160, // fast movement
+    radius: 16,
+    spriteScale: 3.0,
+    barWidth: 28,
+    contactDamage: 25,
+    attackInterval: 1000,
+    scoreValue: 15,
+    expValue: 8,
+    spriteSrc: '/enemies/pitchstud/pitchstud.gif',
+    deathSpriteSrc: '/enemies/pitchstud/dead-pitchstud.gif',
+    coinDropRoll: () => {
+      const rand = Math.random();
+      if (rand <= 0.8) return 5;
+      return 2;
+    },
+  },
 };
