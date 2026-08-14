@@ -1,10 +1,12 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
-export default function Credits({ setGameState }) {
+export default function Credits() {
+  const navigate = useNavigate();
   return (
     <div className="absolute inset-0 bg-slate-950 flex flex-col items-center justify-center z-50">
       <button 
-        onClick={() => setGameState('MENU')}
+        onClick={() => navigate('/')}
         className="absolute top-8 left-8 text-slate-400 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
       >
         <span>←</span> Back to Menu

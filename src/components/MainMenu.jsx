@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import ShapeGrid from './ShapeGrid';
+import { useNavigate } from 'react-router-dom';
+import Waves from './Waves';
 import OptionWheel from './OptionWheel';
+import DepthText from './DepthText';
 
 const MENU_ITEMS = ['Play', 'Almanac', 'Credits'];
-const MENU_STATES = ['CHARACTER_SELECT', 'ALMANAC', 'CREDITS'];
+const MENU_ROUTES = ['/play/select', '/almanac', '/credits'];
 
-export default function MainMenu({ setGameState }) {
+export default function MainMenu() {
+  const navigate = useNavigate();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const handleSelectionChange = (index, value) => {
@@ -13,21 +16,25 @@ export default function MainMenu({ setGameState }) {
   };
 
   const handleItemSelect = (index, value) => {
-    setGameState(MENU_STATES[index]);
+    navigate(MENU_ROUTES[index]);
   };
 
   return (
     <div className="absolute inset-0 flex items-center justify-center z-50 bg-white overflow-hidden">
       {/* Background Component */}
       <div className="absolute inset-0 z-0">
-        <ShapeGrid 
-          shape="circle" 
-          squareSize={50} 
-          borderColor="#e2e8f0" 
-          hoverFillColor="#cbd5e1" 
-          speed={0.5} 
-          direction="diagonal" 
-          hoverTrailAmount={5}
+        <Waves 
+          lineColor="rgba(148, 163, 184, 0.2)" 
+          backgroundColor="transparent" 
+          waveSpeedX={0.02} 
+          waveSpeedY={0.01} 
+          waveAmpX={40} 
+          waveAmpY={20} 
+          friction={0.9} 
+          tension={0.01} 
+          maxCursorMove={120} 
+          xGap={12} 
+          yGap={36} 
         />
       </div>
 
@@ -57,10 +64,17 @@ export default function MainMenu({ setGameState }) {
 
         {/* Right Side: Title & Branding */}
         <div className="w-1/2 h-full flex flex-col justify-center pr-32 text-right items-end">
-          <div className="animate-pulse mb-4">
-            <h1 className="text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-500 to-slate-800 tracking-tighter drop-shadow-sm">
-              WANDERSHOT
-            </h1>
+          <div className="mb-4">
+            <DepthText 
+              text="WANDERSHOT" 
+              layers={34} 
+              depth={2.4} 
+              faceColor="#0f172a" 
+              depthColor="#64748b" 
+              tilt={7.5} 
+              pointerTracking={true} 
+              fontSize="clamp(3rem, 8vw, 6rem)"
+            />
             <p className="text-slate-400 mt-2 text-2xl tracking-[0.3em] uppercase font-bold pr-2">
               Survival RPG
             </p>

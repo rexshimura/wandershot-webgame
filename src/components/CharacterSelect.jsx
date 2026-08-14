@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CLASSES } from '../config/classes-config';
-import ShapeGrid from './ShapeGrid';
+import Waves from './Waves';
 import { renderPlayer } from '../entities/Player';
 
-export default function CharacterSelect({ setGameState, startGame }) {
+export default function CharacterSelect({ setSelectedClass }) {
+  const navigate = useNavigate();
   const classesList = Object.values(CLASSES);
   const [selectedCharId, setSelectedCharId] = useState(classesList[0]?.id);
   const canvasRef = useRef(null);
@@ -29,19 +31,23 @@ export default function CharacterSelect({ setGameState, startGame }) {
   return (
     <div className="absolute inset-0 flex items-center justify-center z-50 bg-slate-50 overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
-        <ShapeGrid 
-          shape="circle" 
-          squareSize={60} 
-          borderColor="#e2e8f0" 
-          hoverFillColor="#cbd5e1" 
-          speed={0.3} 
-          direction="up" 
-          hoverTrailAmount={3}
+        <Waves 
+          lineColor="rgba(148, 163, 184, 0.2)" 
+          backgroundColor="transparent" 
+          waveSpeedX={0.015} 
+          waveSpeedY={0.01} 
+          waveAmpX={32} 
+          waveAmpY={16} 
+          friction={0.9} 
+          tension={0.01} 
+          maxCursorMove={100} 
+          xGap={12} 
+          yGap={36} 
         />
       </div>
 
       <button 
-        onClick={() => setGameState('MENU')}
+        onClick={() => navigate('/')}
         className="absolute top-8 left-8 text-slate-500 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition-colors z-20 font-bold tracking-widest uppercase text-xs"
       >
         <span>←</span> Back to Menu
@@ -150,7 +156,7 @@ export default function CharacterSelect({ setGameState, startGame }) {
               {/* Play Button */}
               <div className="mt-4 z-10 pt-2 pb-2">
                 <button 
-                  onClick={() => startGame(selectedChar.id)}
+                  onClick={() => { setSelectedClass(selectedChar.id); navigate('/play/game'); }}
                   className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-black uppercase tracking-[0.2em] text-sm rounded-xl shadow-lg transition-all duration-300 hover:-translate-y-1"
                 >
                   Begin

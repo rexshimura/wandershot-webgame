@@ -27,8 +27,10 @@ const playAudio = (path, vol = 0.5, pitch = 1.0) => {
   audio.play().catch(() => {});
   return audio;
 };
+import { useNavigate } from 'react-router-dom';
 
-export default function Game({ selectedClass, onGameOver, backToMenu }) {
+export default function Game({ selectedClass }) {
+  const navigate = useNavigate();
   const canvasRef = useRef(null);
   const hpTextRef = useRef(null);
   const hpBarRef = useRef(null);
@@ -1261,7 +1263,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
           if (player.hp <= 0 && !isGameOverRef.current) {
             isGameOverRef.current = true;
             setFinalTime(formatTime(stats.survivalTime));
-            onGameOver();
+            navigate('/');
           }
         }
       }
@@ -1504,7 +1506,7 @@ export default function Game({ selectedClass, onGameOver, backToMenu }) {
         <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center z-30 pointer-events-auto">
           <Pause setIsPaused={setIsPaused} />
           <button 
-            onClick={backToMenu}
+            onClick={() => navigate('/')}
             className="absolute bottom-16 px-8 py-3 bg-rose-900 hover:bg-rose-800 text-white rounded font-bold cursor-pointer transition-colors"
           >
             Quit to Menu
