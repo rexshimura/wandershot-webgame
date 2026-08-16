@@ -1,85 +1,80 @@
 import React, { useState, useEffect } from 'react';
+import { ENEMY_TYPES } from '../config/enemies-config';
 
-export default function DevModePanel({ playerRef, isVisible, hpTextRef, hpBarRef }) {
-  const [stats, setStats] = useState(null);
+export default function DevModePanel({ devActionsRef, isVisible }) {
+  const [playerState, setPlayerState] = useState({ level: 1, exp: 0 });
 
-  // Poll player stats for the dev UI every 500ms since playerRef doesn't trigger React renders
   useEffect(() => {
     if (!isVisible) return;
-    const interval = setInterval(() => {
-      if (playerRef.current) {
-        setStats({
-          spreadshot: playerRef.current.spreadshot || 0,
-          multishot: playerRef.current.multishot || 0,
-          pierce: playerRef.current.pierce || 0,
-          bounce: playerRef.current.bounce || 0,
-          trace: playerRef.current.trace || 0,
-          bulletRadius: playerRef.current.bulletRadius || 6,
-        });
+    const refresh = () => {
+      if (devActionsRef.current?.getPlayerState) {
+        setPlayerState(devActionsRef.current.getPlayerState());
       }
-    }, 500);
+    };
+    refresh();
+    const interval = setInterval(refresh, 300);
     return () => clearInterval(interval);
-  }, [isVisible, playerRef]);
+  }, [isVisible, devActionsRef]);
 
-  if (!isVisible || !stats) return null;
+  if (!isVisible) return null;
 
-  const updateStat = (key, delta) => {
-    if (playerRef.current) {
-      playerRef.current[key] = Math.max(0, (playerRef.current[key] || 0) + delta);
-      // Force UI update immediately for snappiness
-      setStats(prev => ({
-        ...prev,
-        [key]: playerRef.current[key]
-      }));
-    }
-  };
+  const actions = devActionsRef.current;
 
-  const healPlayer = () => {
-    if (playerRef.current) {
-      playerRef.current.hp = playerRef.current.maxHp;
-      if (hpTextRef.current) hpTextRef.current.textContent = `${playerRef.current.hp} / ${playerRef.current.maxHp}`;
-      if (hpBarRef.current) hpBarRef.current.style.width = '100%';
-    }
-  };
-
-  const renderRow = (label, statKey, step = 1) => (
-    <div key={statKey} className="flex justify-between items-center mb-2 bg-slate-800/50 p-2 rounded-lg">
-      <span className="text-slate-300 text-sm font-semibold w-24">{label}</span>
-      <div className="flex items-center gap-2">
-        <button 
-          onPointerDown={() => updateStat(statKey, -step)}
-          className="w-6 h-6 bg-red-900/50 hover:bg-red-800 text-red-200 rounded flex items-center justify-center font-bold pointer-events-auto cursor-pointer"
-        >-</button>
-        <span className="text-white font-mono w-6 text-center">{stats[statKey]}</span>
-        <button 
-          onPointerDown={() => updateStat(statKey, step)}
-          className="w-6 h-6 bg-emerald-900/50 hover:bg-emerald-800 text-emerald-200 rounded flex items-center justify-center font-bold pointer-events-auto cursor-pointer"
-        >+</button>
-      </div>
-    </div>
-  );
+  const enemyTypes = Object.entries(ENEMY_TYPES);
 
   return (
-    <div className="absolute right-4 top-24 w-64 bg-slate-900/80 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl z-[100] pointer-events-auto">
+    <div className="absolute left-4 top-24 w-72 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl z-[100] pointer-events-auto">
       <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-        <h3 className="text-sky-400 font-black tracking-wide">DEV MODE</h3>
-        <span className="text-[10px] text-slate-500 font-mono">PRESS ~ TO HIDE</span>
+        <h3 className="text-amber-400 font-black tracking-wide">DEV MODE</h3>
+        <span className="text-[10px] text-slate-500 font-mono">ALT+P</span>
       </div>
 
-      <div className="flex flex-col gap-1">
-        {renderRow("Spreadshot", "spreadshot")}
-        {renderRow("Multishot", "multishot")}
-        {renderRow("Trace", "trace")}
-        {renderRow("Pierce", "pierce")}
-        {renderRow("Bounce", "bounce")}
-        {renderRow("Bullet Size", "bulletRadius", 3)}
+      <div className="mb-4 bg-slate-800/50 rounded-lg p-3">
+        <div className="flex justify-between items-center text-sm">
+          <span className="text-slate-400 font-semibold">Level</span>
+          <span className="text-sky-400 font-black font-mono">LVL {playerState.level}</span>
+        </div>
+        <div className="flex justify-between items-center text-sm mt-1">
+          <span className="text-slate-400 font-semibold">EXP</span>
+          <span className="text-slate-300 font-mono text-xs">{playerState.exp} / {playerState.neededExp}</span>
+        </div>
       </div>
 
-      <button 
-        onClick={healPlayer}
-        className="w-full mt-4 py-2 bg-rose-900/50 hover:bg-rose-800 text-rose-200 font-bold rounded-lg pointer-events-auto cursor-pointer transition-colors border border-rose-700/50"
+      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Player</p>
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => actions.levelUp?.()}
+          className="flex-1 py-2 bg-sky-900/60 hover:bg-sky-800 text-sky-200 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors border border-sky-700/50"
+        >
+          Level Up
+        </button>
+        <button
+          onClick={() => actions.reset?.()}
+          className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors border border-slate-600/50"
+        >
+          Reset
+        </button>
+      </div>
+
+      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Spawn Enemy</p>
+      <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+        {enemyTypes.map(([key, type]) => (
+          <button
+            key={key}
+            onClick={() => actions.spawnEnemy?.(key)}
+            className="flex justify-between items-center py-2 px-3 bg-slate-800/60 hover:bg-rose-900/40 text-slate-200 rounded-lg text-sm font-semibold cursor-pointer transition-colors border border-slate-700/50 hover:border-rose-700/50"
+          >
+            <span>{type.name}</span>
+            <span className="text-[10px] text-slate-500 font-mono">{type.maxHp} HP</span>
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => actions.clearEnemies?.()}
+        className="w-full mt-3 py-2 bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 font-bold rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors border border-rose-800/40"
       >
-        FULL HEAL
+        Clear All Enemies
       </button>
     </div>
   );

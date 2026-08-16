@@ -59,4 +59,35 @@ export const ENEMY_TYPES = {
       return 2;
     },
   },
+  PITCHCREEP: {
+    name: 'Pitchcreep',
+    maxHp: 150,
+    speed: 180, // fast movement normally
+    radius: 14,
+    spriteScale: 2.8,
+    barWidth: 24,
+    contactDamage: 10,
+    attackInterval: 1000,
+    behavior: 'KITE',
+    erratic: true,
+    preferredRange: 300,
+    shootRange: 550,
+    projectileDamage: 20,
+    projectileSpeed: 300,
+    projectileRadius: 8,
+    shootInterval: 2000,
+    projectileColor: '#ef4444', // red
+    projectileGlowColor: 'rgba(244, 63, 94, 0.6)', // rose-500
+    projectileShadowColor: '#9f1239', // rose-900
+    scoreValue: 10,
+    expValue: 5,
+    spriteSrc: '/enemies/pitchcreep/pitchcreep.gif',
+    deathSpriteSrc: '/enemies/pitchcreep/dead-pitchcreep.gif',
+    coinDropRoll: () => {
+      const rand = Math.random();
+      if (rand <= 0.5) return 2;
+      if (rand <= 0.85) return 1;
+      return 0;
+    },
+  },
 };

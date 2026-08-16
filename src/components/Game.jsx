@@ -15,6 +15,8 @@ import { CLASSES } from '../config/classes-config';
 import Pitchling from './enemies/Pitchling';
 import Pitchwalker from './enemies/Pitchwalker';
 import SkillHUD from './SkillHUD';
+import DevModePanel from './DevModePanel';
+import { getExpForNextLevel } from '../config/exp-config';
 
 const WORLD_WIDTH = 3000;
 const WORLD_HEIGHT = 3000;
@@ -47,9 +49,42 @@ export default function Game({ selectedClass }) {
   const [activeDeathEffects, setActiveDeathEffects] = useState([]);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
   const [isPaused, setIsPaused] = useState(false);
+  const [isBeamActive, setIsBeamActive] = useState(false);
+  const [showDevMode, setShowDevMode] = useState(false);
+  const [isGameOverState, setIsGameOverState] = useState(false);
+  const devModeRef = useRef({ active: false, selectedEnemy: 'PITCHLING' });
+  const godModeRef = useRef(false);
+  const [devModePos, setDevModePos] = useState({ x: 20, y: typeof window !== 'undefined' ? window.innerHeight - 150 : 600 });
+  const [isDraggingDev, setIsDraggingDev] = useState(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const isGameOverRef = useRef(false);
+  const devActionsRef = useRef({});
   const [autoAttack, setAutoAttack] = useState(true);
   const autoAttackRef = useRef(autoAttack);
-  autoAttackRef.current = autoAttack;
+
+  useEffect(() => {
+    const handleDevDrag = (e) => {
+      if (!isDraggingDev) return;
+      setDevModePos({
+        x: e.clientX - dragOffsetRef.current.x,
+        y: e.clientY - dragOffsetRef.current.y
+      });
+    };
+    const handleDevDragEnd = () => setIsDraggingDev(false);
+
+    if (isDraggingDev) {
+      window.addEventListener('mousemove', handleDevDrag);
+      window.addEventListener('mouseup', handleDevDragEnd);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleDevDrag);
+      window.removeEventListener('mouseup', handleDevDragEnd);
+    };
+  }, [isDraggingDev]);
+
+  useEffect(() => {
+    autoAttackRef.current = autoAttack;
+  }, [autoAttack]);
   
   // Expose HUD values via refs
   const manaTextRef = useRef(null);
@@ -89,6 +124,11 @@ export default function Game({ selectedClass }) {
     let mouseDownTime = 0;
 
     const handleKeyDown = (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'p') {
+        devModeRef.current.active = !devModeRef.current.active;
+        setShowDevMode(devModeRef.current.active);
+        return;
+      }
       if (e.key === 'Tab') {
         e.preventDefault();
         setIsPaused((prev) => !prev);
@@ -108,6 +148,24 @@ export default function Game({ selectedClass }) {
     let aimingSkill = null; // 'APPRENTICE_E', 'APPRENTICE_X', 'SQUIRE_X'
 
     const handleMouseDown = (e) => {
+      if (devModeRef.current.active && e.button === 0 && e.target === canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldX = playerRef.current.x + (mouseX - canvas.width / 2) / 0.75;
+        const worldY = playerRef.current.y + (mouseY - canvas.height / 2) / 0.75;
+        
+        const typeKey = devModeRef.current.selectedEnemy;
+        const type = ENEMY_TYPES[typeKey];
+        if (type) {
+          enemies.push({
+            ...type, typeKey, id: Math.random().toString(),
+            x: worldX, y: worldY, hp: type.maxHp, hitTimer: 0, isDead: false,
+            lastAttackTime: 0, lastShotTime: 0,
+          });
+        }
+        return;
+      }
       if (e.button === 2) {
         aimingSkill = null;
         return;
@@ -204,6 +262,17 @@ export default function Game({ selectedClass }) {
     const classConfig = CLASSES[selectedClass] || CLASSES.APPRENTICE;
     const stats = { score: 0, kills: 0, coins: 0, survivalTime: 0 };
     const playerState = { level: 1, exp: 0 };
+    
+    devActionsRef.current.levelUp = () => {
+      playerState.level++;
+      if (levelRef.current) levelRef.current.textContent = `Lv. ${playerState.level}`;
+    };
+    devActionsRef.current.levelDown = () => {
+      if (playerState.level > 1) {
+        playerState.level--;
+        if (levelRef.current) levelRef.current.textContent = `Lv. ${playerState.level}`;
+      }
+    };
 
     playerRef.current = {
       x: WORLD_WIDTH / 2,
@@ -229,6 +298,7 @@ export default function Game({ selectedClass }) {
     let turrets = [];
     let enemies = [];
     let bullets = [];
+    let enemyBullets = [];
     let meleeHits = []; // For squire slashes
     let deathEffects = [];
     let droppedCoins = [];
@@ -869,11 +939,15 @@ export default function Game({ selectedClass }) {
         enemies.push({
           ...type, typeKey, id: Math.random().toString(),
           x, y, hp: type.maxHp, hitTimer: 0, isDead: false,
+          lastAttackTime: 0, lastShotTime: 0,
         });
       };
 
       if (currentTime - lastSpawnTime > 2000) {
         let types = Object.keys(ENEMY_TYPES);
+        if (playerState.level < 3) {
+          types = types.filter(t => t !== 'PITCHCREEP');
+        }
         if (playerState.level < 5) {
           types = types.filter(t => t !== 'PITCHSTUD');
         }
@@ -1221,6 +1295,52 @@ export default function Game({ selectedClass }) {
         }
       }
 
+      // Enemy projectiles
+      for (let b = enemyBullets.length - 1; b >= 0; b--) {
+        const bullet = enemyBullets[b];
+        const stepX = bullet.vx * dt;
+        const stepY = bullet.vy * dt;
+        bullet.x += stepX;
+        bullet.y += stepY;
+        bullet.distanceTraveled += Math.hypot(stepX, stepY);
+
+        const angle = Math.atan2(bullet.vy, bullet.vx);
+        ctx.beginPath();
+        ctx.moveTo(bullet.x, bullet.y);
+        ctx.lineTo(
+          bullet.x - Math.cos(angle) * 18,
+          bullet.y - Math.sin(angle) * 18
+        );
+        ctx.strokeStyle = bullet.glowColor || 'rgba(74, 222, 128, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+        ctx.fillStyle = bullet.color || '#22c55e';
+        ctx.shadowColor = bullet.shadowColor || '#14532d';
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        if (Math.hypot(bullet.x - player.x, bullet.y - player.y) < bullet.radius + player.radius) {
+          if (!godModeRef.current) player.hp -= bullet.damage;
+          if (hpTextRef.current) hpTextRef.current.textContent = `${Math.floor(Math.max(0, player.hp))} / ${player.maxHp}`;
+          if (hpBarRef.current) hpBarRef.current.style.width = `${(Math.max(0, player.hp) / player.maxHp) * 100}%`;
+          if (player.hp <= 0 && !isGameOverRef.current) {
+            isGameOverRef.current = true;
+            setFinalTime(formatTime(stats.survivalTime));
+            setIsGameOverState(true);
+          }
+          enemyBullets.splice(b, 1);
+          continue;
+        }
+
+        if (bullet.distanceTraveled >= bullet.maxRange) {
+          enemyBullets.splice(b, 1);
+        }
+      }
+
 
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
@@ -1232,38 +1352,88 @@ export default function Game({ selectedClass }) {
         const dy = player.y - e.y;
         const dist = Math.hypot(dx, dy);
 
+        const statusSlow = e.slowTimer > 0 ? 0.5 : 1.0;
+        const slowMult = isBeamActive ? 0.15 : 1.0;
+
+        let currentSpeed = e.speed;
+        if (e.typeKey === 'PITCHSTUD' && e.hp < e.maxHp * 0.5) {
+          currentSpeed *= 1.8;
+        }
+        
+        if (e.behavior === 'KITE' && currentTime - e.lastShotTime < 800) {
+          currentSpeed *= 0.2;
+        }
+
+        // Ranged attack for kiting enemies
+        if (e.behavior === 'KITE' && dist <= (e.shootRange || 550) && dist > e.radius + player.radius) {
+          if (currentTime - e.lastShotTime >= (e.shootInterval || 1800)) {
+            const angle = Math.atan2(dy, dx);
+            enemyBullets.push({
+              x: e.x + Math.cos(angle) * e.radius,
+              y: e.y + Math.sin(angle) * e.radius,
+              vx: Math.cos(angle) * (e.projectileSpeed || 420),
+              vy: Math.sin(angle) * (e.projectileSpeed || 420),
+              radius: e.projectileRadius || 7,
+              damage: e.projectileDamage || 14,
+              distanceTraveled: 0,
+              maxRange: e.shootRange || 550,
+              color: e.projectileColor,
+              glowColor: e.projectileGlowColor,
+              shadowColor: e.projectileShadowColor,
+            });
+            e.lastShotTime = currentTime;
+          }
+        }
+
         if (dist > e.radius + player.radius) {
-          const statusSlow = e.slowTimer > 0 ? 0.5 : 1.0;
-          const slowMult = isBeamActive ? 0.15 : 1.0;
-          
-          let currentSpeed = e.speed;
-          if (e.typeKey === 'PITCHSTUD' && e.hp < e.maxHp * 0.5) {
-            currentSpeed *= 1.8; // 80% faster when enraged
+          let moveX, moveY;
+
+          if (e.behavior === 'KITE') {
+            const preferred = e.preferredRange || 300;
+            const minRange = preferred * 0.75;
+            const maxRange = preferred * 1.25;
+
+            if (dist < minRange) {
+              moveX = -(dx / dist) * currentSpeed * slowMult * statusSlow * dt;
+              moveY = -(dy / dist) * currentSpeed * slowMult * statusSlow * dt;
+            } else if (dist > maxRange) {
+              moveX = (dx / dist) * currentSpeed * 0.7 * slowMult * statusSlow * dt;
+              moveY = (dy / dist) * currentSpeed * 0.7 * slowMult * statusSlow * dt;
+            } else {
+              moveX = (-dy / dist) * currentSpeed * 0.6 * slowMult * statusSlow * dt;
+              moveY = (dx / dist) * currentSpeed * 0.6 * slowMult * statusSlow * dt;
+            }
+
+            if (e.erratic) {
+              const wobble = Math.sin(currentTime / 150 + parseFloat(e.id) * 100) * 120 * slowMult * statusSlow * dt;
+              moveX += (-dy / dist) * wobble;
+              moveY += (dx / dist) * wobble;
+            }
+          } else {
+            moveX = (dx / dist) * currentSpeed * slowMult * statusSlow * dt;
+            moveY = (dy / dist) * currentSpeed * slowMult * statusSlow * dt;
+
+            if (e.behavior === 'ERRATIC') {
+              const wobble = Math.sin(currentTime / 150 + parseFloat(e.id) * 100) * 120 * slowMult * statusSlow * dt;
+              moveX += (-dy / dist) * wobble;
+              moveY += (dx / dist) * wobble;
+            }
           }
-          
-          let moveX = (dx / dist) * currentSpeed * slowMult * statusSlow * dt;
-          let moveY = (dy / dist) * currentSpeed * slowMult * statusSlow * dt;
-          
-          if (e.behavior === 'ERRATIC') {
-            const wobble = Math.sin(currentTime / 150 + parseFloat(e.id) * 100) * 120 * slowMult * statusSlow * dt;
-            moveX += (-dy / dist) * wobble;
-            moveY += (dx / dist) * wobble;
-          }
-          
+
           e.x += moveX;
           e.y += moveY;
-        } else if (currentTime - e.lastAttackTime >= 1000) {
-          player.hp -= e.contactDamage;
+        } else if (currentTime - e.lastAttackTime >= (e.attackInterval || 1000)) {
+          if (!godModeRef.current) player.hp -= e.contactDamage;
           if (e.typeKey === 'PITCHSTUD') {
             player.slowDebuff = 2.0;
           }
           e.lastAttackTime = currentTime;
-          if (hpTextRef.current) hpTextRef.current.textContent = `${Math.floor(player.hp)} / ${player.maxHp}`;
-          if (hpBarRef.current) hpBarRef.current.style.width = `${(player.hp / player.maxHp) * 100}%`;
+          if (hpTextRef.current) hpTextRef.current.textContent = `${Math.floor(Math.max(0, player.hp))} / ${player.maxHp}`;
+          if (hpBarRef.current) hpBarRef.current.style.width = `${(Math.max(0, player.hp) / player.maxHp) * 100}%`;
           if (player.hp <= 0 && !isGameOverRef.current) {
             isGameOverRef.current = true;
             setFinalTime(formatTime(stats.survivalTime));
-            navigate('/');
+            setIsGameOverState(true);
           }
         }
       }
@@ -1514,7 +1684,96 @@ export default function Game({ selectedClass }) {
         </div>
       )}
 
+      {isGameOverState && (
+        <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center z-[100] pointer-events-auto">
+          <h1 className="text-6xl font-black text-rose-500 mb-4 tracking-widest drop-shadow-lg">YOU DIED</h1>
+          <p className="text-xl text-slate-300 font-bold mb-8 uppercase tracking-widest">Survival Time: {finalTime}</p>
+          <div className="flex gap-4">
+             <button onClick={() => navigate(0)} className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg transition-colors cursor-pointer">
+               Restart Game
+             </button>
+             <button onClick={() => navigate('/')} className="px-8 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl shadow-lg transition-colors cursor-pointer">
+               Main Menu
+             </button>
+          </div>
+        </div>
+      )}
+
       {/* HTML GIF OVERLAY */}
+      {showDevMode && (
+        <div 
+          className="absolute z-50 flex flex-col bg-white border border-slate-200 shadow-2xl rounded-lg overflow-hidden"
+          style={{ left: devModePos.x, top: devModePos.y }}
+        >
+          {/* Drag Header */}
+          <div 
+            className="bg-slate-100 text-slate-500 text-[10px] font-bold uppercase tracking-widest p-2 cursor-move flex justify-between items-center select-none border-b border-slate-200"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              setIsDraggingDev(true);
+              dragOffsetRef.current = { x: e.clientX - devModePos.x, y: e.clientY - devModePos.y };
+            }}
+          >
+            <span>Dev Mode</span>
+            <span className="text-slate-400">✥</span>
+          </div>
+
+          <div className="p-3 flex gap-2 items-center">
+            {Object.keys(ENEMY_TYPES).map(key => (
+              <button 
+                key={key}
+                className={`relative w-12 h-12 flex items-center justify-center rounded border-2 transition-all cursor-pointer ${
+                  devModeRef.current.selectedEnemy === key 
+                  ? 'border-indigo-500 bg-indigo-50 shadow-inner' 
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  devModeRef.current.selectedEnemy = key;
+                  setShowDevMode(false); 
+                  setTimeout(() => setShowDevMode(true), 0);
+                }}
+                title={key}
+              >
+                <img 
+                  src={ENEMY_TYPES[key].spriteSrc} 
+                  alt={key} 
+                  className="rendering-pixelated max-w-full max-h-full scale-125 object-contain"
+                  draggable={false}
+                />
+              </button>
+            ))}
+          </div>
+
+          <div className="w-full flex justify-between items-center px-3 pb-3">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-600 uppercase">
+              <input 
+                type="checkbox" 
+                defaultChecked={godModeRef.current} 
+                onChange={(e) => { godModeRef.current = e.target.checked; }} 
+                className="w-4 h-4 cursor-pointer" 
+              />
+              God Mode
+            </label>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={(e) => { e.stopPropagation(); devActionsRef.current.levelDown(); }} 
+                className="w-6 h-6 flex items-center justify-center bg-slate-200 rounded hover:bg-slate-300 font-bold text-slate-700 cursor-pointer"
+              >
+                -
+              </button>
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Level</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); devActionsRef.current.levelUp(); }} 
+                className="w-6 h-6 flex items-center justify-center bg-slate-200 rounded hover:bg-slate-300 font-bold text-slate-700 cursor-pointer"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-[5]">
         {activeEnemies.map((enemy) =>
           enemy.isDead ? null : (
